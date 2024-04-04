@@ -27,7 +27,11 @@ type GridField {
 }
 
 type GridState {
-  GridState(grid: Grid, fields: List(GridField))
+  GridState(
+    grid: Grid,
+    fields: dict.Dict(Vector2D, GridField),
+    field_states: List(#(Vector2D, Bool)),
+  )
 }
 
 type GridValidityState {
@@ -442,21 +446,33 @@ pub fn main() {
 
 fn initialize_grid(grid: Grid) -> GridState {
   let field_count = grid.size.x * grid.size.y
-  let fields =
+  let field_states =
     list.range(0, field_count - 1)
     |> list.map(fn(i) {
       let x = i % grid.size.x
       let y = i / grid.size.x
+
       let position = Vector2D(x, y)
       let enabled = !list.contains(grid.disabled_fields, position)
+
+      #(position, enabled)
+    })
+
+  let fields =
+    list.map(field_states, fn(field_state) {
+      let #(position, enabled) = field_state
+
       let symbols = case enabled {
         True -> list.range(0, list.length(grid.symbols) - 1)
         False -> []
       }
       GridField(position, enabled, symbols)
     })
+    |> list.fold(dict.new(), fn(fields, field) {
+      dict.insert(fields, field.position, field)
+    })
 
-  GridState(grid, fields)
+  GridState(grid, fields, field_states)
 }
 
 fn set_field_symbols(
@@ -464,30 +480,36 @@ fn set_field_symbols(
   field: Vector2D,
   symbols: List(Int),
 ) -> GridState {
-  let fields =
-    state.fields
-    |> list.map(fn(current_field) {
-      case current_field.position == field, current_field.enabled {
-        True, True -> GridField(..current_field, symbols: symbols)
-        _, _ -> current_field
-      }
-    })
-
-  GridState(..state, fields: fields)
+  case dict.get(state.fields, field) {
+    Ok(field) -> {
+      let field = GridField(..field, symbols: symbols)
+      let fields = dict.insert(state.fields, field.position, field)
+      GridState(..state, fields: fields)
+    }
+    Error(_) -> state
+  }
 }
 
 fn set_grid_symbols(state: GridState, symbols: List(List(Int))) -> GridState {
   let fields =
-    list.index_map(state.fields, fn(field, index) {
+    list.index_map(state.field_states, fn(field_state, index) {
+      let #(position, _) = field_state
+
       let symbols = list.at(symbols, index)
-      case symbols {
-        Ok(symbols) ->
+      let field = dict.get(state.fields, position)
+
+      case symbols, field {
+        Ok(symbols), Ok(field) ->
           case symbols {
-            [] -> field
-            _ -> GridField(..field, symbols: symbols)
+            [] -> Ok(field)
+            _ -> Ok(GridField(..field, symbols: symbols))
           }
-        Error(_) -> field
+        _, _ -> Error(Nil)
       }
+    })
+    |> list.filter_map(fn(field) { field })
+    |> list.fold(state.fields, fn(fields, field) {
+      dict.insert(fields, field.position, field)
     })
 
   GridState(..state, fields: fields)
@@ -497,78 +519,116 @@ fn apply_rule(state: GridState, rule: Rule) -> Bool {
   apply_rule_where(state, rule, fn(_) { True })
 }
 
+fn enabled_grid_fields(
+  state: GridState,
+  field_states: List(#(Vector2D, Bool)),
+) -> List(GridField) {
+  list.filter_map(field_states, fn(field_state) {
+    let #(position, enabled) = field_state
+    case enabled {
+      True -> dict.get(state.fields, position)
+      False -> Error(Nil)
+    }
+  })
+}
+
 fn apply_rule_where(
   state: GridState,
   rule: Rule,
   affected: fn(List(GridField)) -> Bool,
 ) -> Bool {
-  let is_in_range = fn(field: GridField, range: Range2D) {
-    let x = field.position.x
-    let y = field.position.y
+  let is_in_range = fn(position: Vector2D, range: Range2D) -> Bool {
+    let x = position.x
+    let y = position.y
     let start = range.start
     let end = range.end
 
     x >= start.x && x <= end.x && y >= start.y && y <= end.y
   }
 
+  let enabled_fields_in_range = fn(
+    range: Range2D,
+    field_states: List(#(Vector2D, Bool)),
+  ) -> List(GridField) {
+    list.filter_map(field_states, fn(field_state) {
+      let #(position, enabled) = field_state
+      case enabled && is_in_range(position, range) {
+        True -> dict.get(state.fields, position)
+        False -> Error(Nil)
+      }
+    })
+  }
+
+  let enabled_fields_in_range_or_at = fn(
+    range: Range2D,
+    field_position: Vector2D,
+    field_states: List(#(Vector2D, Bool)),
+  ) -> List(GridField) {
+    list.filter_map(field_states, fn(field_state) {
+      let #(position, enabled) = field_state
+      case
+        enabled
+        && { is_in_range(position, range) || position == field_position }
+      {
+        True -> dict.get(state.fields, position)
+        False -> Error(Nil)
+      }
+    })
+  }
+
   case rule {
     AbsoluteRule(range, validator) -> {
-      let fields =
-        list.filter(state.fields, fn(field) {
-          field.enabled && is_in_range(field, range)
-        })
+      let fields = enabled_fields_in_range(range, state.field_states)
       case affected(fields) {
         True -> validator(state, fields)
         False -> True
       }
     }
     RelativeRule(range, apply, validator) -> {
-      list.all(state.fields, fn(field) {
-        case field.enabled && apply(state, field) {
-          True -> {
-            let position = field.position
-            let start = add_vector2d(position, range.start)
-            let end = add_vector2d(position, range.end)
-            let range = Range2D(start, end)
+      list.all(state.field_states, fn(field_state) {
+        let #(position, enabled) = field_state
+        let field = dict.get(state.fields, position)
 
-            let affected_fields =
-              list.filter(state.fields, fn(field) {
-                field.enabled
-                && { position == field.position || is_in_range(field, range) }
-              })
-
-            case affected(affected_fields) {
-              True -> validator(state, field, affected_fields)
+        case field {
+          Error(_) -> True
+          Ok(field) -> {
+            case enabled && apply(state, field) {
               False -> True
+              True -> {
+                let start = add_vector2d(position, range.start)
+                let end = add_vector2d(position, range.end)
+                let range = Range2D(start, end)
+
+                let affected_fields =
+                  enabled_fields_in_range_or_at(
+                    range,
+                    position,
+                    state.field_states,
+                  )
+
+                case affected(affected_fields) {
+                  True -> validator(state, field, affected_fields)
+                  False -> True
+                }
+              }
             }
           }
-          False -> True
         }
       })
     }
     FilterRule(apply, fields, validator) -> {
-      list.all(state.fields, fn(field) {
-        case field.enabled && apply(state, field) {
+      enabled_grid_fields(state, state.field_states)
+      |> list.all(fn(field) {
+        case apply(state, field) {
+          False -> True
           True -> {
-            let affected_fields =
-              fields(state, field)
-              |> list.filter(fn(field) { field.enabled })
+            let affected_fields = fields(state, field)
 
-            let position = field.position
-
-            let affected_fields = case
-              list.any(affected_fields, fn(field) { position == field.position })
-            {
-              True -> affected_fields
-              False -> list.concat([affected_fields, [field]])
-            }
-
-            case affected(affected_fields) {
+            case affected([field, ..affected_fields]) {
               True -> validator(state, field, affected_fields)
               False -> True
             }
           }
-          False -> True
         }
       })
     }
@@ -589,7 +649,8 @@ fn apply_rules_where(
 }
 
 fn could_state_be_valid(state: GridState) -> Bool {
-  list.all(state.fields, fn(field) {
+  enabled_grid_fields(state, state.field_states)
+  |> list.all(fn(field) {
     case field.enabled {
       True -> !list.is_empty(field.symbols)
       False -> True
@@ -602,14 +663,11 @@ fn is_state_valid(state: GridState) -> Bool {
 }
 
 fn is_state_solved(state: GridState) -> Bool {
-  list.all(state.fields, fn(field) {
-    case field.enabled {
-      True ->
-        case field.symbols {
-          [_] -> True
-          _ -> False
-        }
-      False -> True
+  enabled_grid_fields(state, state.field_states)
+  |> list.all(fn(field) {
+    case field.symbols {
+      [_] -> True
+      _ -> False
     }
   })
   && apply_rules(state)
@@ -672,21 +730,12 @@ fn reduce_fields_once(
                             valid_symbols,
                           )
 
-                        let field =
-                          list.find(state.fields, fn(field) {
-                            field.position == position
-                          })
+                        let field = dict.get(state.fields, field.position)
 
                         case field {
                           Ok(field) -> {
                             let reduced =
-                              list.fold(
-                                state.fields,
-                                reduced,
-                                fn(reduced, field) {
-                                  dict.insert(reduced, field.position, field)
-                                },
-                              )
+                              dict.insert(reduced, field.position, field)
                             list.Continue(#(state, reduced, GridValid))
                           }
                           Error(_) -> list.Continue(state_reduced)
@@ -703,7 +752,12 @@ fn reduce_fields_once(
       },
     )
 
-  #(state, dict.values(reduced), validity)
+  let reduced = case dict.size(reduced) {
+    0 -> []
+    _ -> dict.values(state.fields)
+  }
+
+  #(state, reduced, validity)
 }
 
 fn reduce_fields(
@@ -719,28 +773,7 @@ fn reduce_fields(
 }
 
 fn reduce(state: GridState) -> #(GridState, GridValidityState) {
-  reduce_fields(state, state.fields)
-}
-
-fn sort_fields(state: GridState) -> GridState {
-  let fields =
-    state.fields
-    |> list.sort(fn(a, b) {
-      case a.position.y == b.position.y {
-        True ->
-          case a.position.x < b.position.x {
-            True -> order.Lt
-            False -> order.Gt
-          }
-        False ->
-          case a.position.y < b.position.y {
-            True -> order.Lt
-            False -> order.Gt
-          }
-      }
-    })
-
-  GridState(..state, fields: fields)
+  reduce_fields(state, dict.values(state.fields))
 }
 
 fn collapse(state: GridState) -> #(GridState, GridValidityState) {
@@ -752,7 +785,6 @@ fn collapse(state: GridState) -> #(GridState, GridValidityState) {
       let state =
         state
         |> collapse_unchecked(0)
-        |> sort_fields
 
       case grid_validity_state(state) {
         GridSolved -> #(state, GridSolved)
@@ -765,7 +797,7 @@ fn collapse(state: GridState) -> #(GridState, GridValidityState) {
 
 fn collapse_unchecked(state: GridState, depth: Int) -> GridState {
   let fields =
-    state.fields
+    dict.values(state.fields)
     |> list.sort(fn(a, b) {
       let a_symbols = list.length(a.symbols)
       let b_symbols = list.length(b.symbols)
@@ -780,11 +812,8 @@ fn collapse_unchecked(state: GridState, depth: Int) -> GridState {
     })
 
   io.debug(depth)
-  let sorted = sort_fields(state)
-  let stringified = stringify_grid_state(sorted)
+  let stringified = stringify_grid_state(state)
   io.println(stringified <> "\n")
-
-  let state = GridState(..state, fields: fields)
 
   list.fold_until(fields, state, fn(state, field) {
     case field.enabled {
@@ -843,7 +872,11 @@ fn collapse_unchecked(state: GridState, depth: Int) -> GridState {
 
 fn stringify_grid_state(state: GridState) -> String {
   let grid = state.grid
-  let fields = sort_fields(state).fields
+  let fields =
+    list.filter_map(state.field_states, fn(field_state) {
+      let #(position, _) = field_state
+      dict.get(state.fields, position)
+    })
 
   let field_strings =
     fields
