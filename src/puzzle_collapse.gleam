@@ -136,8 +136,259 @@ pub fn main() {
       fn(_, _, affected_fields) { check_fields_sudoku(affected_fields) },
     )
 
-  let rules = [square_rule, column_rule, row_rule]
+  let get_digits = fn(fields: List(GridField)) -> List(Int) {
+    list.fold(fields, [], fn(numbers, field) {
+      case field.symbols {
+        [symbol] -> [symbol + 1, ..numbers]
+        _ -> numbers
+      }
+    })
+  }
 
+  let get_pairs = fn(fields: List(GridField)) -> List(Int) {
+    let numbers =
+      list.fold(fields, dict.new(), fn(numbers, field) {
+        case field.symbols {
+          [symbol] -> dict.insert(numbers, field.position, symbol)
+          _ -> numbers
+        }
+      })
+
+    list.fold(dict.keys(numbers), [], fn(pairs, position) {
+      let symbol = dict.get(numbers, position)
+      case symbol {
+        Ok(symbol) -> {
+          let x = position.x
+          let y = position.y
+          let value = { symbol + 1 } * 10
+
+          let right = dict.get(numbers, Vector2D(x + 1, y))
+          let pairs = case right {
+            Ok(right) -> {
+              let pair = value + right + 1
+              [pair, ..pairs]
+            }
+            Error(_) -> pairs
+          }
+
+          let down = dict.get(numbers, Vector2D(x, y + 1))
+          case down {
+            Ok(down) -> {
+              let pair = value + down + 1
+              [pair, ..pairs]
+            }
+            Error(_) -> pairs
+          }
+        }
+        Error(_) -> pairs
+      }
+    })
+  }
+
+  let sums_equls = fn(fields: List(GridField), positions: List(List(Vector2D))) -> Bool {
+    let sums =
+      list.fold(positions, [], fn(sums, positions) {
+        let sum =
+          list.fold_until(positions, Ok(0), fn(sum, position) {
+            case sum {
+              Ok(sum) -> {
+                let field =
+                  list.find(fields, fn(field) { field.position == position })
+                case field {
+                  Ok(field) -> {
+                    case field.symbols {
+                      [symbol] -> list.Continue(Ok(sum + symbol))
+                      _ -> list.Stop(Error(Nil))
+                    }
+                  }
+                  _ -> list.Stop(Error(Nil))
+                }
+              }
+              Error(_) -> list.Stop(Error(Nil))
+            }
+          })
+
+        case sum {
+          Ok(sum) -> [sum, ..sums]
+          Error(_) -> sums
+        }
+      })
+
+    case sums {
+      [first, ..rest] -> list.all(rest, fn(sum) { sum == first })
+      _ -> True
+    }
+  }
+
+  let box_1_rule =
+    AbsoluteRule(Range2D(Vector2D(0, 0), Vector2D(2, 2)), fn(_, fields) {
+      let pairs = get_pairs(fields)
+      let digets = get_digits(fields)
+
+      let contains_pair = fn(pair) {
+        let digit_a = pair / 10
+        let digit_b = pair % 10
+
+        case list.contains(digets, digit_a), list.contains(digets, digit_b) {
+          True, True -> list.contains(pairs, pair)
+          _, _ -> True
+        }
+      }
+      contains_pair(16)
+      && contains_pair(25)
+      && contains_pair(36)
+      && contains_pair(49)
+      && contains_pair(64)
+      && contains_pair(81)
+    })
+
+  let box_3_5_7_validator = fn(fields: List(GridField)) -> Bool {
+    let pairs = get_pairs(fields)
+    case list.length(pairs) {
+      12 -> {
+        let is_prime = fn(number) {
+          number == 11
+          || number == 13
+          || number == 17
+          || number == 19
+          || number == 23
+          || number == 29
+          || number == 31
+          || number == 37
+          || number == 41
+          || number == 43
+          || number == 47
+          || number == 53
+          || number == 59
+          || number == 61
+          || number == 67
+          || number == 71
+          || number == 73
+          || number == 79
+          || number == 83
+          || number == 89
+          || number == 97
+        }
+
+        let pairs = list.filter(pairs, is_prime)
+        let digits =
+          list.fold(pairs, dict.new(), fn(digits, pair) {
+            let first = pair / 10
+            let second = pair % 10
+
+            dict.insert(digits, first, True)
+            |> dict.insert(second, True)
+          })
+
+        dict.size(digits) == 9
+      }
+      _ -> True
+    }
+  }
+
+  let box_3_rule =
+    AbsoluteRule(Range2D(Vector2D(6, 0), Vector2D(8, 2)), fn(_, fields) {
+      box_3_5_7_validator(fields)
+    })
+
+  let box_4_rule =
+    AbsoluteRule(Range2D(Vector2D(0, 3), Vector2D(2, 5)), fn(_, fields) {
+      sums_equls(fields, [
+        [Vector2D(0, 3), Vector2D(1, 3), Vector2D(2, 3)],
+        [Vector2D(0, 4), Vector2D(1, 4), Vector2D(2, 4)],
+        [Vector2D(0, 5), Vector2D(1, 5), Vector2D(2, 5)],
+        [Vector2D(0, 3), Vector2D(0, 4), Vector2D(0, 5)],
+        [Vector2D(1, 3), Vector2D(1, 4), Vector2D(1, 5)],
+        [Vector2D(2, 3), Vector2D(2, 4), Vector2D(2, 5)],
+        [Vector2D(0, 3), Vector2D(1, 4), Vector2D(2, 5)],
+        [Vector2D(0, 5), Vector2D(1, 4), Vector2D(2, 3)],
+      ])
+    })
+
+  let box_5_rule =
+    AbsoluteRule(Range2D(Vector2D(3, 3), Vector2D(5, 5)), fn(_, fields) {
+      box_3_5_7_validator(fields)
+    })
+
+  let box_6_8_validator = fn(offset: Vector2D, fields: List(GridField)) -> Bool {
+    let positions =
+      [
+        [Vector2D(0, 0), Vector2D(1, 1), Vector2D(2, 2)],
+        [Vector2D(0, 2), Vector2D(1, 1), Vector2D(2, 0)],
+      ]
+      |> list.map(fn(positions) {
+        list.map(positions, fn(position) { add_vector2d(position, offset) })
+      })
+    sums_equls(fields, positions)
+  }
+
+  let box_6_rule =
+    AbsoluteRule(Range2D(Vector2D(6, 3), Vector2D(8, 5)), fn(_, fields) {
+      box_6_8_validator(Vector2D(6, 3), fields)
+    })
+
+  let box_7_rule =
+    AbsoluteRule(Range2D(Vector2D(0, 6), Vector2D(2, 8)), fn(_, fields) {
+      box_3_5_7_validator(fields)
+    })
+
+  let box_8_rule =
+    AbsoluteRule(Range2D(Vector2D(3, 6), Vector2D(5, 8)), fn(_, fields) {
+      box_6_8_validator(Vector2D(3, 6), fields)
+    })
+
+  let box_9_rule =
+    AbsoluteRule(Range2D(Vector2D(0, 0), Vector2D(8, 8)), fn(_, fields) {
+      let symbols_equlse = fn(position_a, position_b) -> Bool {
+        let field_a =
+          list.find(fields, fn(field) { field.position == position_a })
+        let field_b =
+          list.find(fields, fn(field) { field.position == position_b })
+
+        case field_a, field_b {
+          Ok(field_a), Ok(field_b) ->
+            case field_a.symbols, field_b.symbols {
+              [symbol_a], [symbol_b] -> symbol_a == symbol_b
+              _, _ -> True
+            }
+          _, _ -> True
+        }
+      }
+
+      symbols_equlse(Vector2D(0, 0), Vector2D(8, 8))
+      && symbols_equlse(Vector2D(1, 0), Vector2D(7, 8))
+      && symbols_equlse(Vector2D(2, 0), Vector2D(6, 8))
+      && symbols_equlse(Vector2D(0, 1), Vector2D(8, 7))
+      && symbols_equlse(Vector2D(1, 1), Vector2D(7, 7))
+      && symbols_equlse(Vector2D(2, 1), Vector2D(6, 7))
+      && symbols_equlse(Vector2D(0, 2), Vector2D(8, 6))
+      && symbols_equlse(Vector2D(1, 2), Vector2D(7, 6))
+      && symbols_equlse(Vector2D(2, 2), Vector2D(6, 6))
+    })
+
+  // https://youtu.be/La7Yg_rav24
+  let rules = [
+    square_rule,
+    column_rule,
+    row_rule,
+    box_1_rule,
+    box_3_rule,
+    box_4_rule,
+    box_5_rule,
+    box_6_rule,
+    box_7_rule,
+    box_8_rule,
+    box_9_rule,
+  ]
+
+  //box_1_rule,
+  //box_3_rule,
+  //box_4_rule,
+  //box_5_rule,
+  //box_6_rule,
+  //box_7_rule,
+  //box_8_rule,
+  //box_9_rule,
   let grid =
     Grid(
       Vector2D(9, 9),
@@ -146,18 +397,47 @@ pub fn main() {
       rules,
     )
 
-  let state = initialize_grid(grid)
+  let state =
+    initialize_grid(grid)
+    |> set_grid_symbols(
+      //[
+      //  [[7], [0], [1], [3], [6], [2], [5], [4], [8]],
+      //  [[2], [5], [4], [0], [8], [7], [6], [1], [3]],
+      //  [[6], [3], [8], [4], [5], [1], [7], [2], [0]],
+      //  [[3], [2], [7], [5], [4], [8], [0], [6], [1]],
+      //  [[8], [4], [0], [6], [1], [3], [2], [7], [5]],
+      //  [[1], [6], [5], [7], [2], [0], [3], [8], [4]],
+      //  [[5], [7], [2], [1], [0], [4], [8], [3], [6]],
+      //  [[0], [1], [3], [8], [7], [6], [4], [5], [2]],
+      //  [[4], [8], [6], [2], [3], [5], [1], [0], [7]],
+      //]
+      [
+        [[7], [0], [1], [], [], [], [], [], []],
+        [[2], [5], [4], [], [], [], [], [], []],
+        [[6], [3], [8], [], [], [], [], [], []],
+        [[], [], [], [], [], [], [], [], []],
+        [[], [], [], [], [], [], [], [], []],
+        [[], [], [], [], [], [], [], [], []],
+        [[], [], [], [], [], [], [], [], []],
+        [[], [], [], [], [], [], [], [], []],
+        [[], [], [], [], [], [], [], [], []],
+      ]
+      |> list.concat,
+    )
 
   let stringified = stringify_grid_state(state)
   io.println(stringified <> "\n")
 
-  let state = reduce(state)
+  let #(state, _) = reduce(state)
   let stringified = stringify_grid_state(state)
   io.println(stringified <> "\n")
 
   let #(state, _) = collapse(state)
   let stringified = stringify_grid_state(state)
   io.println(stringified <> "\n")
+
+  io.debug(grid_validity_state(state))
+  Nil
 }
 
 fn initialize_grid(grid: Grid) -> GridState {
@@ -190,6 +470,23 @@ fn set_field_symbols(
       case current_field.position == field, current_field.enabled {
         True, True -> GridField(..current_field, symbols: symbols)
         _, _ -> current_field
+      }
+    })
+
+  GridState(..state, fields: fields)
+}
+
+fn set_grid_symbols(state: GridState, symbols: List(List(Int))) -> GridState {
+  let fields =
+    list.index_map(state.fields, fn(field, index) {
+      let symbols = list.at(symbols, index)
+      case symbols {
+        Ok(symbols) ->
+          case symbols {
+            [] -> field
+            _ -> GridField(..field, symbols: symbols)
+          }
+        Error(_) -> field
       }
     })
 
@@ -291,14 +588,17 @@ fn apply_rules_where(
   list.all(rules, apply_rule_where(state, _, affected))
 }
 
-fn is_state_valid(state: GridState) -> Bool {
+fn could_state_be_valid(state: GridState) -> Bool {
   list.all(state.fields, fn(field) {
     case field.enabled {
       True -> !list.is_empty(field.symbols)
       False -> True
     }
   })
-  && apply_rules(state)
+}
+
+fn is_state_valid(state: GridState) -> Bool {
+  could_state_be_valid(state) && apply_rules(state)
 }
 
 fn is_state_solved(state: GridState) -> Bool {
@@ -326,18 +626,22 @@ fn grid_validity_state(state: GridState) -> GridValidityState {
   }
 }
 
-fn reduce_once(state: GridState) -> #(GridState, Bool) {
-  case grid_validity_state(state) {
-    GridSolved -> #(state, False)
-    GridInvalid -> #(state, False)
-    GridValid -> {
-      list.fold(state.fields, #(state, False), fn(state_reduced, field) {
-        let #(state, reduced) = state_reduced
+fn reduce_fields_once(
+  state: GridState,
+  fields: List(GridField),
+) -> #(GridState, List(GridField), GridValidityState) {
+  let #(state, reduced, validity) =
+    list.fold_until(
+      fields,
+      #(state, dict.new(), GridValid),
+      fn(state_reduced, field) {
+        let #(state, reduced, _) = state_reduced
 
         case field.enabled {
           True ->
             case field.symbols {
-              [_] -> state_reduced
+              [] -> list.Stop(#(state, dict.new(), GridInvalid))
+              [_] -> list.Continue(state_reduced)
               symbols -> {
                 let position = field.position
                 let valid_symbols =
@@ -345,6 +649,7 @@ fn reduce_once(state: GridState) -> #(GridState, Bool) {
                     let new_state =
                       set_field_symbols(state, field.position, [symbol])
 
+                    // TODO: reduce all affected fields
                     apply_rules_where(new_state, fn(affected_fields) {
                       list.any(affected_fields, fn(field) {
                         field.position == position
@@ -352,27 +657,90 @@ fn reduce_once(state: GridState) -> #(GridState, Bool) {
                     })
                   })
 
-                let symbols_changed =
-                  list.length(valid_symbols) < list.length(symbols)
-                let state =
-                  set_field_symbols(state, field.position, valid_symbols)
+                case list.is_empty(valid_symbols) {
+                  True -> list.Stop(#(state, dict.new(), GridInvalid))
+                  False -> {
+                    let symbols_changed =
+                      list.length(valid_symbols) < list.length(symbols)
 
-                #(state, symbols_changed || reduced)
+                    case symbols_changed {
+                      True -> {
+                        let state =
+                          set_field_symbols(
+                            state,
+                            field.position,
+                            valid_symbols,
+                          )
+
+                        let field =
+                          list.find(state.fields, fn(field) {
+                            field.position == position
+                          })
+
+                        case field {
+                          Ok(field) -> {
+                            let reduced =
+                              list.fold(
+                                state.fields,
+                                reduced,
+                                fn(reduced, field) {
+                                  dict.insert(reduced, field.position, field)
+                                },
+                              )
+                            list.Continue(#(state, reduced, GridValid))
+                          }
+                          Error(_) -> list.Continue(state_reduced)
+                        }
+                      }
+                      False -> list.Continue(state_reduced)
+                    }
+                  }
+                }
               }
             }
-          False -> state_reduced
+          False -> list.Continue(state_reduced)
         }
-      })
-    }
+      },
+    )
+
+  #(state, dict.values(reduced), validity)
+}
+
+fn reduce_fields(
+  state: GridState,
+  fields: List(GridField),
+) -> #(GridState, GridValidityState) {
+  let #(state, reduced, validity) = reduce_fields_once(state, fields)
+
+  case list.is_empty(reduced), validity {
+    False, GridValid -> reduce_fields(state, reduced)
+    _, _ -> #(state, validity)
   }
 }
 
-fn reduce(state: GridState) -> GridState {
-  let #(state, reduced) = reduce_once(state)
-  case reduced {
-    True -> reduce(state)
-    False -> state
-  }
+fn reduce(state: GridState) -> #(GridState, GridValidityState) {
+  reduce_fields(state, state.fields)
+}
+
+fn sort_fields(state: GridState) -> GridState {
+  let fields =
+    state.fields
+    |> list.sort(fn(a, b) {
+      case a.position.y == b.position.y {
+        True ->
+          case a.position.x < b.position.x {
+            True -> order.Lt
+            False -> order.Gt
+          }
+        False ->
+          case a.position.y < b.position.y {
+            True -> order.Lt
+            False -> order.Gt
+          }
+      }
+    })
+
+  GridState(..state, fields: fields)
 }
 
 fn collapse(state: GridState) -> #(GridState, GridValidityState) {
@@ -380,9 +748,12 @@ fn collapse(state: GridState) -> #(GridState, GridValidityState) {
     GridSolved -> #(state, GridSolved)
     GridInvalid -> #(state, GridInvalid)
     GridValid -> {
+      let #(state, _) = reduce(state)
       let state =
-        reduce(state)
-        |> collapse_unchecked
+        state
+        |> collapse_unchecked(0)
+        |> sort_fields
+
       case grid_validity_state(state) {
         GridSolved -> #(state, GridSolved)
         GridInvalid -> #(state, GridInvalid)
@@ -392,7 +763,7 @@ fn collapse(state: GridState) -> #(GridState, GridValidityState) {
   }
 }
 
-fn collapse_unchecked(state: GridState) -> GridState {
+fn collapse_unchecked(state: GridState, depth: Int) -> GridState {
   let fields =
     state.fields
     |> list.sort(fn(a, b) {
@@ -408,6 +779,13 @@ fn collapse_unchecked(state: GridState) -> GridState {
       }
     })
 
+  io.debug(depth)
+  let sorted = sort_fields(state)
+  let stringified = stringify_grid_state(sorted)
+  io.println(stringified <> "\n")
+
+  let state = GridState(..state, fields: fields)
+
   list.fold_until(fields, state, fn(state, field) {
     case field.enabled {
       True ->
@@ -422,12 +800,13 @@ fn collapse_unchecked(state: GridState) -> GridState {
                 #(state, False),
                 fn(state_solved, symbol) {
                   let #(state, _) = state_solved
-                  let new_state =
+                  let #(new_state, validity) =
                     set_field_symbols(state, field.position, [symbol])
                     |> reduce
 
                   let is_valid =
-                    apply_rules_where(new_state, fn(affected_fields) {
+                    validity != GridInvalid
+                    && apply_rules_where(new_state, fn(affected_fields) {
                       list.any(affected_fields, fn(field) {
                         field.position == position
                       })
@@ -439,7 +818,8 @@ fn collapse_unchecked(state: GridState) -> GridState {
                       case is_state_solved(new_state) {
                         True -> list.Stop(#(new_state, True))
                         False -> {
-                          let collapsed = collapse_unchecked(new_state)
+                          let collapsed =
+                            collapse_unchecked(new_state, depth + 1)
                           case is_state_solved(collapsed) {
                             True -> list.Stop(#(collapsed, True))
                             False -> list.Continue(#(state, False))
@@ -463,9 +843,10 @@ fn collapse_unchecked(state: GridState) -> GridState {
 
 fn stringify_grid_state(state: GridState) -> String {
   let grid = state.grid
+  let fields = sort_fields(state).fields
 
   let field_strings =
-    state.fields
+    fields
     |> list.map(fn(field) {
       let symbol = case field.enabled {
         True ->
