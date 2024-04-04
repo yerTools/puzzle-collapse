@@ -1,9 +1,9 @@
 import gleam/dict
 import gleam/io
-import gleam/order
 import gleam/option
 import gleam/list
 import gleam/string
+import gleam/int
 
 type Vector2D {
   Vector2D(x: Int, y: Int)
@@ -371,8 +371,28 @@ pub fn main() {
     })
 
   // https://youtu.be/La7Yg_rav24
-  let rules = [square_rule, column_rule, row_rule]
+  let rules = [
+    square_rule,
+    column_rule,
+    row_rule,
+    box_1_rule,
+    box_3_rule,
+    box_4_rule,
+    box_5_rule,
+    box_6_rule,
+    box_7_rule,
+    box_8_rule,
+    box_9_rule,
+  ]
 
+  // box_1_rule,
+  // box_3_rule,
+  // box_4_rule,
+  // box_5_rule,
+  // box_6_rule,
+  // box_7_rule,
+  // box_8_rule,
+  // box_9_rule,
   let grid =
     Grid(
       Vector2D(9, 9),
@@ -395,17 +415,7 @@ pub fn main() {
       //  [[0], [1], [3], [8], [7], [6], [4], [5], [2]],
       //  [[4], [8], [6], [2], [3], [5], [1], [0], [7]],
       //]
-      [
-        [[7], [0], [1], [3], [6], [2], [5], [4], [8]],
-        [[2], [5], [4], [0], [8], [7], [6], [1], [3]],
-        [[6], [3], [8], [4], [5], [1], [7], [2], [0]],
-        [[3], [2], [7], [5], [4], [8], [0], [6], [1]],
-        [[8], [4], [0], [6], [1], [3], [2], [7], [5]],
-        [[], [], [], [], [], [], [], [], []],
-        [[], [], [], [], [], [], [], [], []],
-        [[], [], [], [], [], [], [], [], []],
-        [[], [], [], [], [], [], [], [], []],
-      ]
+      []
       |> list.concat,
     )
 
@@ -843,110 +853,154 @@ fn collapse(state: GridState) -> #(GridState, GridValidityState) {
   }
 }
 
-fn collapse_once(state: GridState, depth: Int) -> #(List(GridState), Bool) {
-  let fields =
-    dict.values(state.fields)
-    |> list.sort(fn(a, b) {
-      let a_symbols = list.length(a.symbols)
-      let b_symbols = list.length(b.symbols)
-      case a_symbols < b_symbols {
-        True -> order.Lt
-        False ->
-          case a_symbols == b_symbols {
-            True -> order.Eq
-            False -> order.Gt
+fn collapse_once(
+  states: List(#(GridState, List(#(GridField, List(Int))))),
+  known_states: dict.Dict(GridState, Bool),
+) -> #(
+  List(#(GridState, List(#(GridField, List(Int))))),
+  Bool,
+  dict.Dict(GridState, Bool),
+) {
+  let states =
+    list.sort(states, fn(a, b) {
+      let calculate_possibilities = fn(state) {
+        enabled_grid_fields(state, state.field_states)
+        |> list.fold(0, fn(possibilities, field) {
+          case field.symbols {
+            [] | [_] -> possibilities
+            symbols -> possibilities + list.length(symbols)
           }
+        })
       }
+
+      let #(a, _) = a
+      let #(b, _) = b
+      let possibilities_a = calculate_possibilities(a)
+      let possibilities_b = calculate_possibilities(b)
+
+      int.compare(possibilities_a, possibilities_b)
     })
 
-  io.debug(depth)
-  //let stringified = stringify_grid_state(state)
-  //io.println(stringified <> "\n")
+  io.debug(#("collapse_once", list.length(states), dict.size(known_states)))
 
-  let #(states, solved) =
-    list.fold_until(fields, #([], False), fn(states_solved, field) {
-      case field.enabled {
+  case states {
+    [] -> #(states, False, known_states)
+    [state, ..states_rest] -> {
+      let #(state, fields) = state
+
+      let fields = case list.is_empty(fields) {
+        False -> fields
         True ->
-          case field.symbols {
-            [] -> list.Continue(states_solved)
-            [_] -> list.Continue(states_solved)
-            symbols -> {
-              let #(states, solved) =
-                list.fold_until(
-                  symbols,
-                  states_solved,
-                  fn(states_solved, symbol) {
-                    let #(new_state, validity) =
-                      set_field_symbols(state, field.position, [symbol])
-                      |> reduce
+          dict.values(state.fields)
+          |> list.filter(fn(field) {
+            case field.enabled {
+              False -> False
+              True -> list.length(field.symbols) > 1
+            }
+          })
+          |> list.sort(fn(a, b) {
+            let a_symbols = list.length(a.symbols)
+            let b_symbols = list.length(b.symbols)
 
-                    let is_valid = case validity {
-                      GridInvalid -> False
-                      _ -> True
-                    }
+            int.compare(a_symbols, b_symbols)
+          })
+          |> list.map(fn(field) { #(field, field.symbols) })
+      }
 
-                    case is_valid {
-                      False -> list.Continue(states_solved)
-                      True ->
-                        case is_state_solved(new_state) {
-                          True -> list.Stop(#([new_state], True))
-                          False -> {
-                            let #(states, _) = states_solved
-                            list.Continue(#([new_state, ..states], False))
-                          }
-                        }
-                    }
-                  },
+      case fields {
+        [] -> #(states_rest, False, known_states)
+        [field, ..field_rest] -> {
+          let #(field, symbols) = field
+
+          case symbols {
+            [] -> {
+              case list.is_empty(field_rest) {
+                True -> #(states_rest, False, known_states)
+                False -> #(
+                  [#(state, field_rest), ..states_rest],
+                  False,
+                  known_states,
                 )
+              }
+            }
+            [symbol, ..symbols_rest] -> {
+              let #(new_state, validity) =
+                set_field_symbols(state, field.position, [symbol])
+                |> reduce
 
-              case solved {
-                True -> list.Stop(#(states, solved))
-                False -> list.Continue(#(states, solved))
+              let stringified = stringify_grid_state(new_state)
+              io.println(stringified <> "\n")
+
+              let is_valid = case validity {
+                GridInvalid -> False
+                _ -> True
+              }
+
+              let result = [
+                #(state, [#(field, symbols_rest), ..field_rest]),
+                ..states_rest
+              ]
+              case is_valid {
+                False -> #(result, False, known_states)
+                True ->
+                  case is_state_solved(new_state) {
+                    True -> {
+                      io.println("Solved")
+                      #([#(new_state, [])], True, known_states)
+                    }
+                    False -> {
+                      case dict.has_key(known_states, new_state) {
+                        True -> {
+                          io.println("State known")
+                          #(result, False, known_states)
+                        }
+                        False -> {
+                          let known_states =
+                            dict.insert(known_states, new_state, True)
+                          #([#(new_state, []), ..result], False, known_states)
+                        }
+                      }
+                    }
+                  }
               }
             }
           }
-        False -> list.Continue(states_solved)
-      }
-    })
-
-  io.debug(list.length(states))
-  #(states, solved)
-}
-
-fn collapse_multiple_once(
-  states: List(GridState),
-  depth: Int,
-) -> #(List(GridState), Bool) {
-  list.fold_until(states, #([], False), fn(states_solved, state) {
-    let #(new_states, solved) = collapse_once(state, depth)
-    case solved {
-      True -> list.Stop(#(new_states, solved))
-      False -> {
-        let #(states, _) = states_solved
-        list.Continue(#(list.append(states, new_states), solved))
+        }
       }
     }
-  })
+  }
 }
 
 fn collapse_multiple(
-  states: List(GridState),
-  depth: Int,
-) -> #(List(GridState), Bool) {
-  let #(states, solved) = collapse_multiple_once(states, depth)
+  states: List(#(GridState, List(#(GridField, List(Int))))),
+  known_states: dict.Dict(GridState, Bool),
+) -> #(
+  List(#(GridState, List(#(GridField, List(Int))))),
+  Bool,
+  dict.Dict(GridState, Bool),
+) {
+  let #(states, solved, known_states) = collapse_once(states, known_states)
 
   case states, solved {
-    [], _ -> #(states, solved)
-    next_states, False -> collapse_multiple(next_states, depth + 1)
+    [], _ -> #(states, solved, known_states)
+    next_states, False -> collapse_multiple(next_states, known_states)
 
-    _, _ -> #(states, solved)
+    _, _ -> #(states, solved, known_states)
   }
 }
 
 fn collapse_unchecked(state: GridState) -> GridState {
-  let #(states, solved) = collapse_multiple([state], 0)
+  let #(states, solved, _) =
+    collapse_multiple(
+      [#(state, [])],
+      dict.new()
+        |> dict.insert(state, True),
+    )
   case states, solved {
-    [solution], True -> solution
+    [solution], True -> {
+      let #(state, _) = solution
+      state
+    }
 
     _, _ -> state
   }
