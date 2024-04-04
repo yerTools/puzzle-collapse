@@ -515,13 +515,6 @@ fn set_grid_symbols(state: GridState, symbols: List(List(Int))) -> GridState {
   GridState(..state, fields: fields)
 }
 
-fn apply_rule(
-  state: GridState,
-  rule: Rule,
-) -> #(Bool, dict.Dict(Vector2D, Bool)) {
-  apply_rule_where(state, rule, fn(_) { True })
-}
-
 fn enabled_grid_fields(
   state: GridState,
   field_states: List(#(Vector2D, Bool)),
@@ -859,7 +852,13 @@ fn collapse(state: GridState) -> #(GridState, GridValidityState) {
       let #(state, _) = reduce(state)
       let state =
         state
-        |> collapse_unchecked(0)
+        |> collapse_unchecked(
+          list.map(state.field_states, fn(field) {
+            let #(position, _) = field
+            position
+          }),
+          0,
+        )
 
       case grid_validity_state(state) {
         GridSolved -> #(state, GridSolved)
@@ -870,9 +869,14 @@ fn collapse(state: GridState) -> #(GridState, GridValidityState) {
   }
 }
 
-fn collapse_unchecked(state: GridState, depth: Int) -> GridState {
+fn collapse_unchecked(
+  state: GridState,
+  positions: List(Vector2D),
+  depth: Int,
+) -> GridState {
   let fields =
-    dict.values(state.fields)
+    positions
+    |> list.filter_map(fn(position) { dict.get(state.fields, position) })
     |> list.sort(fn(a, b) {
       let a_symbols = list.length(a.symbols)
       let b_symbols = list.length(b.symbols)
@@ -928,7 +932,14 @@ fn collapse_unchecked(state: GridState, depth: Int) -> GridState {
                         True -> list.Stop(#(new_state, True))
                         False -> {
                           let collapsed =
-                            collapse_unchecked(new_state, depth + 1)
+                            collapse_unchecked(
+                              new_state,
+                              list.map(new_state.field_states, fn(field_state) {
+                                let #(position, _) = field_state
+                                position
+                              }),
+                              depth + 1,
+                            )
                           case is_state_solved(collapsed) {
                             True -> list.Stop(#(collapsed, True))
                             False -> list.Continue(#(state, False))
