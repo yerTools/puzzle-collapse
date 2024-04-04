@@ -396,11 +396,11 @@ pub fn main() {
       //  [[4], [8], [6], [2], [3], [5], [1], [0], [7]],
       //]
       [
-        [[7], [0], [1], [], [], [], [], [], []],
-        [[2], [5], [4], [], [], [], [], [], []],
-        [[6], [3], [8], [], [], [], [], [], []],
-        [[], [], [], [], [], [], [], [], []],
-        [[], [], [], [], [], [], [], [], []],
+        [[7], [0], [1], [3], [6], [2], [5], [4], [8]],
+        [[2], [5], [4], [0], [8], [7], [6], [1], [3]],
+        [[6], [3], [8], [4], [5], [1], [7], [2], [0]],
+        [[3], [2], [7], [5], [4], [8], [0], [6], [1]],
+        [[8], [4], [0], [6], [1], [3], [2], [7], [5]],
         [[], [], [], [], [], [], [], [], []],
         [[], [], [], [], [], [], [], [], []],
         [[], [], [], [], [], [], [], [], []],
@@ -918,12 +918,12 @@ fn collapse_multiple_once(
   depth: Int,
 ) -> #(List(GridState), Bool) {
   list.fold_until(states, #([], False), fn(states_solved, state) {
-    let #(states, solved) = collapse_once(state, depth)
+    let #(new_states, solved) = collapse_once(state, depth)
     case solved {
-      True -> list.Stop(#(states, solved))
+      True -> list.Stop(#(new_states, solved))
       False -> {
         let #(states, _) = states_solved
-        list.Continue(#([state, ..states], solved))
+        list.Continue(#(list.append(states, new_states), solved))
       }
     }
   })
@@ -934,6 +934,7 @@ fn collapse_multiple(
   depth: Int,
 ) -> #(List(GridState), Bool) {
   let #(states, solved) = collapse_multiple_once(states, depth)
+
   case states, solved {
     [], _ -> #(states, solved)
     next_states, False -> collapse_multiple(next_states, depth + 1)
