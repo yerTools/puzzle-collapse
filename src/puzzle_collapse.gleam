@@ -371,19 +371,7 @@ pub fn main() {
     })
 
   // https://youtu.be/La7Yg_rav24
-  let rules = [
-    square_rule,
-    column_rule,
-    row_rule,
-    box_1_rule,
-    box_3_rule,
-    box_4_rule,
-    box_5_rule,
-    box_6_rule,
-    box_7_rule,
-    box_8_rule,
-    box_9_rule,
-  ]
+  let rules = [square_rule, column_rule, row_rule, box_1_rule]
 
   // box_1_rule,
   // box_3_rule,
@@ -503,6 +491,30 @@ fn set_grid_symbols(state: GridState, symbols: List(List(Int))) -> GridState {
     })
 
   GridState(..state, fields: fields)
+}
+
+fn set_field_symbols_and_reduce(
+  state: GridState,
+  position: Vector2D,
+  symbols: List(Int),
+) -> #(GridState, GridValidityState) {
+  let state = set_field_symbols(state, position, symbols)
+  let #(valid, affected) =
+    apply_rules_where(state, fn(affected_fields) {
+      list.any(affected_fields, fn(field) { field.position == position })
+    })
+
+  case valid {
+    False -> #(state, GridInvalid)
+    True -> {
+      let fields =
+        [position, ..dict.keys(affected)]
+        |> list.filter_map(fn(field) { dict.get(state.fields, field) })
+
+      let #(state, _, validity) = reduce_fields_once(state, fields)
+      #(state, validity)
+    }
+  }
 }
 
 fn enabled_grid_fields(
@@ -925,11 +937,7 @@ fn collapse_once(
             }
             [symbol, ..symbols_rest] -> {
               let #(new_state, validity) =
-                set_field_symbols(state, field.position, [symbol])
-                |> reduce
-
-              let stringified = stringify_grid_state(new_state)
-              io.println(stringified <> "\n")
+                set_field_symbols_and_reduce(state, field.position, [symbol])
 
               let is_valid = case validity {
                 GridInvalid -> False
@@ -957,6 +965,10 @@ fn collapse_once(
                         False -> {
                           let known_states =
                             dict.insert(known_states, new_state, True)
+
+                          let stringified = stringify_grid_state(new_state)
+                          io.println(stringified <> "\n")
+
                           #([#(new_state, []), ..result], False, known_states)
                         }
                       }
