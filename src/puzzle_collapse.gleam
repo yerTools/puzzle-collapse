@@ -767,6 +767,76 @@ fn grid_validity_state(state: GridState) -> GridValidityState {
   }
 }
 
+fn reduce_single_field_symbols_once(
+  state: GridState,
+  field: GridField,
+  result: #(List(Int), dict.Dict(Vector2D, Bool)),
+  symbol: Int,
+) {
+  let new_state = set_field_symbols(state, field.position, [symbol])
+
+  let #(valid, affected_positions) =
+    apply_rules_where(new_state, fn(affected_fields) {
+      list.any(affected_fields, fn(affected_field) {
+        field.position == affected_field.position
+      })
+    })
+
+  case valid {
+    False -> result
+    True -> {
+      let #(valid_symbols, result_affected_positions) = result
+      let valid_symbols = [symbol, ..valid_symbols]
+      let affected_positions =
+        dict.merge(result_affected_positions, affected_positions)
+      #(valid_symbols, affected_positions)
+    }
+  }
+}
+
+fn reduce_single_field_once(
+  state_reduced: #(GridState, dict.Dict(Vector2D, Bool), GridValidityState),
+  field: GridField,
+) -> list.ContinueOrStop(
+  #(GridState, dict.Dict(Vector2D, Bool), GridValidityState),
+) {
+  let #(state, reduced, _) = state_reduced
+
+  case field.enabled {
+    True ->
+      case field.symbols {
+        [] -> list.Stop(#(state, dict.new(), GridInvalid))
+        [_] -> list.Continue(state_reduced)
+        symbols -> {
+          let #(valid_symbols, affected_positions) =
+            list.fold(symbols, #([], dict.new()), fn(result, symbol) {
+              reduce_single_field_symbols_once(state, field, result, symbol)
+            })
+
+          case list.is_empty(valid_symbols) {
+            True -> list.Stop(#(state, dict.new(), GridInvalid))
+            False -> {
+              let symbols_changed =
+                list.length(valid_symbols) < list.length(symbols)
+
+              case symbols_changed {
+                True -> {
+                  let state =
+                    set_field_symbols(state, field.position, valid_symbols)
+
+                  let reduced = dict.merge(reduced, affected_positions)
+                  list.Continue(#(state, reduced, GridValid))
+                }
+                False -> list.Continue(state_reduced)
+              }
+            }
+          }
+        }
+      }
+    False -> list.Continue(state_reduced)
+  }
+}
+
 fn reduce_fields_once(
   state: GridState,
   fields: List(GridField),
@@ -775,70 +845,7 @@ fn reduce_fields_once(
     list.fold_until(
       fields,
       #(state, dict.new(), GridValid),
-      fn(state_reduced, field) {
-        let #(state, reduced, _) = state_reduced
-
-        case field.enabled {
-          True ->
-            case field.symbols {
-              [] -> list.Stop(#(state, dict.new(), GridInvalid))
-              [_] -> list.Continue(state_reduced)
-              symbols -> {
-                let position = field.position
-                let #(valid_symbols, affected_positions) =
-                  list.fold(symbols, #([], dict.new()), fn(result, symbol) {
-                    let new_state =
-                      set_field_symbols(state, field.position, [symbol])
-
-                    let #(valid, affected_positions) =
-                      apply_rules_where(new_state, fn(affected_fields) {
-                        list.any(affected_fields, fn(field) {
-                          field.position == position
-                        })
-                      })
-
-                    case valid {
-                      False -> result
-                      True -> {
-                        let #(valid_symbols, result_affected_positions) = result
-                        let valid_symbols = [symbol, ..valid_symbols]
-                        let affected_positions =
-                          dict.merge(
-                            result_affected_positions,
-                            affected_positions,
-                          )
-                        #(valid_symbols, affected_positions)
-                      }
-                    }
-                  })
-
-                case list.is_empty(valid_symbols) {
-                  True -> list.Stop(#(state, dict.new(), GridInvalid))
-                  False -> {
-                    let symbols_changed =
-                      list.length(valid_symbols) < list.length(symbols)
-
-                    case symbols_changed {
-                      True -> {
-                        let state =
-                          set_field_symbols(
-                            state,
-                            field.position,
-                            valid_symbols,
-                          )
-
-                        let reduced = dict.merge(reduced, affected_positions)
-                        list.Continue(#(state, reduced, GridValid))
-                      }
-                      False -> list.Continue(state_reduced)
-                    }
-                  }
-                }
-              }
-            }
-          False -> list.Continue(state_reduced)
-        }
-      },
+      reduce_single_field_once,
     )
 
   let reduced = case dict.size(reduced) {
@@ -886,6 +893,29 @@ fn collapse(state: GridState) -> #(GridState, GridValidityState) {
   }
 }
 
+fn sort_collapse_states(
+  states: List(#(GridState, List(#(GridField, List(Int))))),
+) -> List(#(GridState, List(#(GridField, List(Int))))) {
+  list.sort(states, fn(a, b) {
+    let calculate_possibilities = fn(state) {
+      enabled_grid_fields(state, state.field_states)
+      |> list.fold(0, fn(possibilities, field) {
+        case field.symbols {
+          [] | [_] -> possibilities
+          symbols -> possibilities + list.length(symbols)
+        }
+      })
+    }
+
+    let #(a, _) = a
+    let #(b, _) = b
+    let possibilities_a = calculate_possibilities(a)
+    let possibilities_b = calculate_possibilities(b)
+
+    int.compare(possibilities_a, possibilities_b)
+  })
+}
+
 fn collapse_once(
   states: List(#(GridState, List(#(GridField, List(Int))))),
   known_states: dict.Dict(GridState, Bool),
@@ -894,25 +924,7 @@ fn collapse_once(
   Bool,
   dict.Dict(GridState, Bool),
 ) {
-  let states =
-    list.sort(states, fn(a, b) {
-      let calculate_possibilities = fn(state) {
-        enabled_grid_fields(state, state.field_states)
-        |> list.fold(0, fn(possibilities, field) {
-          case field.symbols {
-            [] | [_] -> possibilities
-            symbols -> possibilities + list.length(symbols)
-          }
-        })
-      }
-
-      let #(a, _) = a
-      let #(b, _) = b
-      let possibilities_a = calculate_possibilities(a)
-      let possibilities_b = calculate_possibilities(b)
-
-      int.compare(possibilities_a, possibilities_b)
-    })
+  let states = sort_collapse_states(states)
 
   case states {
     [] -> #(states, False, known_states)
