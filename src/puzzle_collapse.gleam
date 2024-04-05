@@ -371,7 +371,19 @@ pub fn main() {
     })
 
   // https://youtu.be/La7Yg_rav24
-  let rules = [square_rule, column_rule, row_rule, box_1_rule]
+  let rules = [
+    square_rule,
+    column_rule,
+    row_rule,
+    box_1_rule,
+    box_3_rule,
+    box_4_rule,
+    box_5_rule,
+    box_6_rule,
+    box_7_rule,
+    box_8_rule,
+    box_9_rule,
+  ]
 
   // box_1_rule,
   // box_3_rule,
@@ -403,7 +415,17 @@ pub fn main() {
       //  [[0], [1], [3], [8], [7], [6], [4], [5], [2]],
       //  [[4], [8], [6], [2], [3], [5], [1], [0], [7]],
       //]
-      []
+      [
+        [[], [], [], [], [], [], [], [], []],
+        [[], [], [], [], [], [], [], [], []],
+        [[], [], [], [], [], [], [], [], []],
+        [[], [], [], [], [], [], [], [], []],
+        [[], [], [], [], [], [], [], [], []],
+        [[], [], [], [], [], [], [], [], []],
+        [[], [], [], [], [], [], [], [], []],
+        [[], [], [], [], [], [], [], [], []],
+        [[], [], [], [], [], [], [], [], []],
+      ]
       |> list.concat,
     )
 
@@ -517,7 +539,7 @@ fn set_field_symbols_and_reduce(
             [position, ..dict.keys(affected)]
             |> list.filter_map(fn(field) { dict.get(state.fields, field) })
 
-          let #(state, _, validity) = reduce_fields_once(state, fields)
+          let #(state, validity) = reduce_fields(state, fields)
           #(state, validity, known_states)
         }
       }
@@ -970,7 +992,12 @@ fn collapse_once(
                     False -> {
                       case dict.has_key(known_states, new_state) {
                         True -> {
-                          io.println("State known")
+                          io.debug(#(
+                            "State known",
+                            "collapse_once",
+                            list.length(states),
+                            dict.size(known_states),
+                          ))
                           #(result, False, known_states)
                         }
                         False -> {
