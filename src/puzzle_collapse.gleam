@@ -497,22 +497,30 @@ fn set_field_symbols_and_reduce(
   state: GridState,
   position: Vector2D,
   symbols: List(Int),
-) -> #(GridState, GridValidityState) {
+  known_states: dict.Dict(GridState, Bool),
+) -> #(GridState, GridValidityState, dict.Dict(GridState, Bool)) {
   let state = set_field_symbols(state, position, symbols)
-  let #(valid, affected) =
-    apply_rules_where(state, fn(affected_fields) {
-      list.any(affected_fields, fn(field) { field.position == position })
-    })
+  case dict.has_key(known_states, state) {
+    True -> #(state, GridInvalid, known_states)
+    False -> {
+      let known_states = dict.insert(known_states, state, True)
 
-  case valid {
-    False -> #(state, GridInvalid)
-    True -> {
-      let fields =
-        [position, ..dict.keys(affected)]
-        |> list.filter_map(fn(field) { dict.get(state.fields, field) })
+      let #(valid, affected) =
+        apply_rules_where(state, fn(affected_fields) {
+          list.any(affected_fields, fn(field) { field.position == position })
+        })
 
-      let #(state, _, validity) = reduce_fields_once(state, fields)
-      #(state, validity)
+      case valid {
+        False -> #(state, GridInvalid, known_states)
+        True -> {
+          let fields =
+            [position, ..dict.keys(affected)]
+            |> list.filter_map(fn(field) { dict.get(state.fields, field) })
+
+          let #(state, _, validity) = reduce_fields_once(state, fields)
+          #(state, validity, known_states)
+        }
+      }
     }
   }
 }
@@ -893,8 +901,6 @@ fn collapse_once(
       int.compare(possibilities_a, possibilities_b)
     })
 
-  io.debug(#("collapse_once", list.length(states), dict.size(known_states)))
-
   case states {
     [] -> #(states, False, known_states)
     [state, ..states_rest] -> {
@@ -936,8 +942,13 @@ fn collapse_once(
               }
             }
             [symbol, ..symbols_rest] -> {
-              let #(new_state, validity) =
-                set_field_symbols_and_reduce(state, field.position, [symbol])
+              let #(new_state, validity, known_states) =
+                set_field_symbols_and_reduce(
+                  state,
+                  field.position,
+                  [symbol],
+                  known_states,
+                )
 
               let is_valid = case validity {
                 GridInvalid -> False
@@ -965,6 +976,12 @@ fn collapse_once(
                         False -> {
                           let known_states =
                             dict.insert(known_states, new_state, True)
+
+                          io.debug(#(
+                            "collapse_once",
+                            list.length(states),
+                            dict.size(known_states),
+                          ))
 
                           let stringified = stringify_grid_state(new_state)
                           io.println(stringified <> "\n")
