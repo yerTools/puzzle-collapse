@@ -1,9 +1,9 @@
 import gleam/dict
-import gleam/io
-import gleam/option
-import gleam/list
-import gleam/string
 import gleam/int
+import gleam/io
+import gleam/list
+import gleam/option
+import gleam/string
 
 type Vector2D {
   Vector2D(x: Int, y: Int)
