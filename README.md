@@ -1,20 +1,20 @@
-# xxx
+# puzzle_collapse
 
-[![Package Version](https://img.shields.io/hexpm/v/xxx)](https://hex.pm/packages/xxx)
-[![Hex Docs](https://img.shields.io/badge/hex-docs-ffaff3)](https://hexdocs.pm/xxx/)
+[![Package Version](https://img.shields.io/hexpm/v/puzzle_collapse)](https://hex.pm/packages/puzzle_collapse)
+[![Hex Docs](https://img.shields.io/badge/hex-docs-ffaff3)](https://hexdocs.pm/puzzle_collapse/)
 
 ```sh
-gleam add xxx@1
+gleam add puzzle_collapse@1
 ```
 ```gleam
-import xxx
+import puzzle_collapse
 
 pub fn main() {
   // TODO: An example of the project in use
 }
 ```
 
-Further documentation can be found at <https://hexdocs.pm/xxx>.
+Further documentation can be found at <https://hexdocs.pm/puzzle_collapse>.
 
 ## Development
 
