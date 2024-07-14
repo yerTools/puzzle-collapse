@@ -220,7 +220,7 @@ fn print_puzzle(puzzle_state: PuzzleState) {
               Error(_) -> width
             }
 
-            dict.insert(column_sizes, x, width)
+            let column_sizes = dict.insert(column_sizes, x, width)
 
             let column_symbols = [#(x, y, start_end, symbol), ..column_symbols]
             #(column_sizes, column_symbols)
@@ -257,7 +257,9 @@ fn print_puzzle(puzzle_state: PuzzleState) {
         }
 
       let result = case dict.get(column_sizes, x) {
-        Ok(column_size) -> result <> string.repeat("═", column_size)
+        Ok(column_size) -> {
+          result <> string.repeat("═", column_size)
+        }
         Error(_) -> result
       }
 
@@ -294,10 +296,11 @@ fn print_puzzle(puzzle_state: PuzzleState) {
     io.print(start_end)
 
     case x == puzzle_state.puzzle.size.x - 1 {
-      True -> io.println("╣")
+      True -> {
+        io.println("╣")
+        io.println(write_line(False, y == puzzle_state.puzzle.size.y - 1))
+      }
       False -> Nil
     }
-
-    io.println(write_line(False, y == puzzle_state.puzzle.size.y - 1))
   })
 }
