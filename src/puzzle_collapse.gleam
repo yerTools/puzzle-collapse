@@ -1,5 +1,4 @@
 import gleam/dict.{type Dict}
-import gleam/int
 import gleam/io
 import gleam/list
 import gleam/option.{None, Some}
@@ -19,8 +18,8 @@ type Rule {
 
 type FieldSymbol {
   UndefinedSymbol
-  FieldSymbol(Int)
-  ConstantSymbol(Int)
+  FieldSymbol(String)
+  ConstantSymbol(String)
 }
 
 type Puzzle {
@@ -50,7 +49,7 @@ fn sudoku_puzzle() -> PuzzleState {
           Error(Nil) -> exisiting_symbols
           Ok(UndefinedSymbol) -> exisiting_symbols
           Ok(symbol) -> {
-            dict.update(exisiting_symbols, symbol, fn(x) {
+            dict.upsert(exisiting_symbols, symbol, fn(x) {
               case x {
                 Some(i) -> i + 1
                 None -> 1
@@ -197,23 +196,15 @@ fn print_puzzle(puzzle_state: PuzzleState) {
               Ok(UndefinedSymbol) -> #("?", "*")
 
               Ok(ConstantSymbol(symbol)) -> {
-                let symbol_value = list.at(puzzle_state.puzzle.symbols, symbol)
-
-                case symbol_value {
-                  Ok(symbol_value) -> #("!", symbol_value)
-                  Error(_) -> #("!n", int.to_string(symbol))
-                }
+                #("!", symbol)
               }
 
               Ok(FieldSymbol(symbol)) -> {
-                let symbol_value = list.at(puzzle_state.puzzle.symbols, symbol)
                 let collission = dict.has_key(puzzle_state.collisions, position)
 
-                case symbol_value, collission {
-                  Ok(symbol_value), True -> #("~", symbol_value)
-                  Ok(symbol_value), False -> #("", symbol_value)
-                  Error(_), True -> #("~n", int.to_string(symbol))
-                  Error(_), False -> #("n", int.to_string(symbol))
+                case collission {
+                  True -> #("~", symbol)
+                  False -> #("", symbol)
                 }
               }
               Error(Nil) -> #(" ", "")
