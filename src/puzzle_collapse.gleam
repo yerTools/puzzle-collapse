@@ -180,14 +180,69 @@ fn sudoku_puzzle() -> PuzzleState {
   PuzzleState(sudoku, empty_symbols, dict.new())
 }
 
+fn set_sudoku_constants(
+  puzzle_state: PuzzleState,
+  values: List(List(Int)),
+) -> PuzzleState {
+  let values =
+    list.fold(values, [], fn(values, row) {
+      list.append(
+        values,
+        list.append(row, list.repeat(0, 9 - list.length(row))) |> list.take(9),
+      )
+    })
+
+  let #(puzzle_state, _) =
+    list.fold(values, #(puzzle_state, Vector2D(0, 0)), fn(state, value) {
+      let #(state, position) = state
+
+      let state = case value >= 1 && value <= 9 {
+        True ->
+          PuzzleState(
+            ..state,
+            field_symbols: dict.insert(
+              state.field_symbols,
+              position,
+              ConstantSymbol(value - 1),
+            ),
+          )
+        False -> state
+      }
+
+      let position = add_vector2d(position, Vector2D(1, 0))
+
+      let position = case position {
+        Vector2D(9, y) -> Vector2D(0, y + 1)
+        Vector2D(x, y) -> Vector2D(x, y)
+      }
+
+      #(state, position)
+    })
+
+  puzzle_state
+}
+
 pub fn main() {
+  let seed = seed.random()
   let puzzle = sudoku_puzzle()
-  let seed = seed.new(0)
+
+  let puzzle =
+    set_sudoku_constants(puzzle, [
+      [0, 0, 0, 0, 0, 5, 0, 7, 0],
+      [2, 0, 5, 0, 0, 0, 4, 0, 0],
+      [0, 0, 0, 6, 0, 0, 8, 0, 0],
+      [0, 0, 7, 0, 0, 0, 0, 1, 9],
+      [0, 1, 0, 0, 0, 0, 0, 0, 0],
+      [0, 9, 0, 0, 0, 8, 0, 0, 6],
+      [0, 0, 0, 1, 9, 6, 0, 0, 0],
+      [7, 4, 0, 0, 8, 0, 0, 0, 0],
+      [3, 0, 0, 0, 7, 0, 0, 0, 0],
+    ])
 
   print_puzzle(puzzle)
   let #(puzzle, _, _) =
     list.fold_until(
-      list.range(1, 10_000),
+      list.range(1, 100_000),
       #(puzzle, seed, dict.size(puzzle.collisions)),
       fn(state, iteration) {
         let #(puzzle, seed, collisions) = state
@@ -211,7 +266,7 @@ pub fn main() {
 
         case success {
           True -> {
-            case int.modulo(iteration, 100) {
+            case int.modulo(iteration, 1000) {
               Ok(0) -> print_puzzle(puzzle)
               _ -> Nil
             }
@@ -261,12 +316,8 @@ fn set_random_cell(
     })
   }
 
-  let possibilities =
-    get_possibilities(
-      puzzle_state,
-      get_possibilities(puzzle_state, dict.new(), False),
-      True,
-    )
+  let todo_possibilities = get_possibilities(puzzle_state, dict.new(), False)
+  let possibilities = get_possibilities(puzzle_state, todo_possibilities, True)
 
   case dict.is_empty(possibilities) {
     True -> #(puzzle_state, seed, False)
@@ -278,14 +329,15 @@ fn set_random_cell(
       case dict.get(possibilities, field) {
         Ok(position) -> {
           let update = fn(state, value) {
+            let value = case value {
+              -1 -> UndefinedSymbol
+              _ -> FieldSymbol(value)
+            }
+
             let state =
               PuzzleState(
                 ..state,
-                field_symbols: dict.insert(
-                  state.field_symbols,
-                  position,
-                  FieldSymbol(value),
-                ),
+                field_symbols: dict.insert(state.field_symbols, position, value),
               )
 
             let collisions =
@@ -301,7 +353,7 @@ fn set_random_cell(
 
           let next_states =
             list.fold(
-              list.range(0, dict.size(puzzle_state.puzzle.symbols) - 1),
+              list.range(-1, dict.size(puzzle_state.puzzle.symbols) - 1),
               None,
               fn(state, value) {
                 let next = update(puzzle_state, value)
