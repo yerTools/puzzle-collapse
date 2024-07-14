@@ -1,8 +1,12 @@
+import gleam/bool
 import gleam/dict.{type Dict}
+import gleam/int
 import gleam/io
-import gleam/list
+import gleam/list.{Continue, Stop}
 import gleam/option.{None, Some}
 import gleam/string
+import prng/random
+import prng/seed
 
 type Vector2D {
   Vector2D(x: Int, y: Int)
@@ -12,18 +16,22 @@ fn add_vector2d(a: Vector2D, b: Vector2D) -> Vector2D {
   Vector2D(a.x + b.x, a.y + b.y)
 }
 
+fn mul_vector2d(a: Vector2D, b: Int) -> Vector2D {
+  Vector2D(a.x * b, a.y * b)
+}
+
 type Rule {
-  Rule(collisions: fn(PuzzleState, Vector2D) -> List(Vector2D))
+  Rule(collisions: fn(PuzzleState) -> List(Vector2D))
 }
 
 type FieldSymbol {
   UndefinedSymbol
-  FieldSymbol(String)
-  ConstantSymbol(String)
+  FieldSymbol(Int)
+  ConstantSymbol(Int)
 }
 
 type Puzzle {
-  Puzzle(size: Vector2D, symbols: List(String), rules: List(Rule))
+  Puzzle(size: Vector2D, symbols: Dict(Int, String), rules: List(Rule))
 }
 
 type PuzzleState {
@@ -34,13 +42,22 @@ type PuzzleState {
   )
 }
 
+fn range_2d(start: Vector2D, end: Vector2D) -> List(Vector2D) {
+  list.fold(list.range(start.y, end.y), [], fn(result, y) {
+    list.append(
+      result,
+      list.map(list.range(start.x, end.x), fn(x) { Vector2D(x, y) }),
+    )
+  })
+}
+
 fn sudoku_puzzle() -> PuzzleState {
   let find_duplicates = fn(
     state: PuzzleState,
     start_position: Vector2D,
     offsets: List(Vector2D),
   ) -> List(Vector2D) {
-    let exisiting_symbols: Dict(FieldSymbol, Int) =
+    let exisiting_symbols: Dict(Int, Int) =
       list.fold(offsets, dict.new(), fn(exisiting_symbols, offset) {
         let position = add_vector2d(start_position, offset)
         let field_symbol = dict.get(state.field_symbols, position)
@@ -49,6 +66,12 @@ fn sudoku_puzzle() -> PuzzleState {
           Error(Nil) -> exisiting_symbols
           Ok(UndefinedSymbol) -> exisiting_symbols
           Ok(symbol) -> {
+            let symbol = case symbol {
+              ConstantSymbol(symbol) -> symbol
+              FieldSymbol(symbol) -> symbol
+              UndefinedSymbol -> 0
+            }
+
             dict.upsert(exisiting_symbols, symbol, fn(x) {
               case x {
                 Some(i) -> i + 1
@@ -67,8 +90,13 @@ fn sudoku_puzzle() -> PuzzleState {
         case field_symbol {
           Error(Nil) -> [position, ..collisions]
           Ok(UndefinedSymbol) -> collisions
-          Ok(ConstantSymbol(_)) -> collisions
           Ok(symbol) -> {
+            let symbol = case symbol {
+              ConstantSymbol(symbol) -> symbol
+              FieldSymbol(symbol) -> symbol
+              UndefinedSymbol -> 0
+            }
+
             case dict.get(exisiting_symbols, symbol) {
               Ok(count) ->
                 case count > 1 {
@@ -85,92 +113,212 @@ fn sudoku_puzzle() -> PuzzleState {
   }
 
   let square_rule =
-    Rule(collisions: fn(state: PuzzleState, position: Vector2D) -> List(
-      Vector2D,
-    ) {
-      let square_top_left = Vector2D(position.x / 3 * 3, position.y / 3 * 3)
+    Rule(collisions: fn(state: PuzzleState) -> List(Vector2D) {
+      let square_offsets = range_2d(Vector2D(0, 0), Vector2D(2, 2))
 
-      let square_offsets = [
-        Vector2D(0, 0),
-        Vector2D(1, 0),
-        Vector2D(2, 0),
-        Vector2D(0, 1),
-        Vector2D(1, 1),
-        Vector2D(2, 1),
-        Vector2D(0, 2),
-        Vector2D(1, 2),
-        Vector2D(2, 2),
-      ]
-
-      find_duplicates(state, square_top_left, square_offsets)
+      list.fold(
+        range_2d(Vector2D(0, 0), Vector2D(2, 2)),
+        [],
+        fn(collisions, square) {
+          list.append(
+            collisions,
+            find_duplicates(state, mul_vector2d(square, 3), square_offsets),
+          )
+        },
+      )
     })
 
   let horizontal_rule =
-    Rule(collisions: fn(state: PuzzleState, position: Vector2D) -> List(
-      Vector2D,
-    ) {
-      let horizontal_left = Vector2D(0, position.y)
+    Rule(collisions: fn(state: PuzzleState) -> List(Vector2D) {
+      let horizontal_offsets = range_2d(Vector2D(0, 0), Vector2D(8, 0))
 
-      let horizontal_offsets = [
-        Vector2D(0, 0),
-        Vector2D(1, 0),
-        Vector2D(2, 0),
-        Vector2D(3, 0),
-        Vector2D(4, 0),
-        Vector2D(5, 0),
-        Vector2D(6, 0),
-        Vector2D(7, 0),
-        Vector2D(8, 0),
-      ]
-
-      find_duplicates(state, horizontal_left, horizontal_offsets)
+      list.fold(
+        range_2d(Vector2D(0, 0), Vector2D(0, 8)),
+        [],
+        fn(collisions, row) {
+          list.append(
+            collisions,
+            find_duplicates(state, row, horizontal_offsets),
+          )
+        },
+      )
     })
 
   let vertical_rule =
-    Rule(collisions: fn(state: PuzzleState, position: Vector2D) -> List(
-      Vector2D,
-    ) {
-      let vertical_top = Vector2D(position.x, 0)
+    Rule(collisions: fn(state: PuzzleState) -> List(Vector2D) {
+      let vertical_offsets = range_2d(Vector2D(0, 0), Vector2D(0, 8))
 
-      let vertical_offsets = [
-        Vector2D(0, 0),
-        Vector2D(0, 1),
-        Vector2D(0, 2),
-        Vector2D(0, 3),
-        Vector2D(0, 4),
-        Vector2D(0, 5),
-        Vector2D(0, 6),
-        Vector2D(0, 7),
-        Vector2D(0, 8),
-      ]
-
-      find_duplicates(state, vertical_top, vertical_offsets)
+      list.fold(
+        range_2d(Vector2D(0, 0), Vector2D(8, 0)),
+        [],
+        fn(collisions, column) {
+          list.append(
+            collisions,
+            find_duplicates(state, column, vertical_offsets),
+          )
+        },
+      )
     })
 
   let sudoku =
-    Puzzle(Vector2D(9, 9), ["1", "2", "3", "4", "5", "6", "7", "8", "9"], [
-      square_rule,
-      vertical_rule,
-      horizontal_rule,
-    ])
+    Puzzle(
+      Vector2D(9, 9),
+      ["1", "2", "3", "4", "5", "6", "7", "8", "9"]
+        |> list.fold(dict.new(), fn(symbols, symbol) {
+          dict.insert(symbols, dict.size(symbols), symbol)
+        }),
+      [square_rule, vertical_rule, horizontal_rule],
+    )
 
   let empty_symbols: Dict(Vector2D, FieldSymbol) =
-    list.fold(list.range(0, 8), dict.new(), fn(symbols, y) {
-      list.fold(list.range(0, 9), symbols, fn(symbols, x) {
-        dict.insert(symbols, Vector2D(x, y), UndefinedSymbol)
-      })
-    })
+    list.fold(
+      range_2d(Vector2D(0, 0), Vector2D(8, 8)),
+      dict.new(),
+      fn(symbols, pos) { dict.insert(symbols, pos, UndefinedSymbol) },
+    )
 
   PuzzleState(sudoku, empty_symbols, dict.new())
 }
 
 pub fn main() {
   let puzzle = sudoku_puzzle()
+  let seed = seed.new(0)
+
+  print_puzzle(puzzle)
+  let #(puzzle, _) =
+    list.fold_until(
+      list.range(1, 10_000),
+      #(puzzle, seed),
+      fn(state, iteration) {
+        let #(puzzle, seed) = state
+
+        let #(puzzle, seed, success) = set_random_cell(puzzle, seed)
+
+        io.println(
+          "Iteration #"
+          <> int.to_string(iteration)
+          <> " collisions: "
+          <> int.to_string(dict.size(puzzle.collisions))
+          <> " ("
+          <> bool.to_string(success)
+          <> ")",
+        )
+
+        case success {
+          True -> {
+            case int.modulo(iteration, 100) {
+              Ok(0) -> print_puzzle(puzzle)
+              _ -> Nil
+            }
+
+            Continue(#(puzzle, seed))
+          }
+          False -> {
+            Stop(#(puzzle, seed))
+          }
+        }
+      },
+    )
 
   print_puzzle(puzzle)
 }
 
-fn print_puzzle(puzzle_state: PuzzleState) {
+fn set_random_cell(
+  puzzle_state: PuzzleState,
+  seed: seed.Seed,
+) -> #(PuzzleState, seed.Seed, Bool) {
+  let symbols = dict.to_list(puzzle_state.field_symbols)
+
+  let possibilities =
+    list.fold(symbols, dict.new(), fn(possibilities, cell) {
+      let #(position, symbol) = cell
+      case symbol {
+        ConstantSymbol(_) -> possibilities
+        UndefinedSymbol ->
+          dict.insert(possibilities, dict.size(possibilities), position)
+        FieldSymbol(_) -> {
+          case dict.has_key(puzzle_state.collisions, position) {
+            False -> possibilities
+            True ->
+              dict.insert(possibilities, dict.size(possibilities), position)
+          }
+        }
+      }
+    })
+
+  case dict.is_empty(possibilities) {
+    True -> #(puzzle_state, seed, False)
+    False -> {
+      let rnd_field = random.int(0, dict.size(possibilities) - 1)
+
+      let #(field, seed) = random.step(rnd_field, seed)
+
+      case dict.get(possibilities, field) {
+        Ok(position) -> {
+          let update = fn(state, value) {
+            let state =
+              PuzzleState(
+                ..state,
+                field_symbols: dict.insert(
+                  state.field_symbols,
+                  position,
+                  FieldSymbol(value),
+                ),
+              )
+
+            let collisions =
+              list.concat(
+                list.map(state.puzzle.rules, fn(rule) { rule.collisions(state) }),
+              )
+              |> list.fold(dict.new(), fn(collisions, position) {
+                dict.insert(collisions, position, Nil)
+              })
+
+            PuzzleState(..state, collisions: collisions)
+          }
+
+          let next_states =
+            list.fold(
+              list.range(0, dict.size(puzzle_state.puzzle.symbols) - 1),
+              None,
+              fn(state, value) {
+                let next = update(puzzle_state, value)
+                let n = dict.size(puzzle_state.collisions)
+
+                case state {
+                  None -> Some(#(n, dict.new() |> dict.insert(0, next)))
+                  Some(#(existing_n, nexts)) -> {
+                    case n < existing_n, n == existing_n {
+                      True, _ -> Some(#(n, dict.new() |> dict.insert(0, next)))
+                      _, True ->
+                        Some(#(n, nexts |> dict.insert(dict.size(nexts), next)))
+                      _, _ -> Some(#(existing_n, nexts))
+                    }
+                  }
+                }
+              },
+            )
+
+          case next_states {
+            None -> #(puzzle_state, seed, False)
+            Some(#(_, states)) -> {
+              let rnd_state = random.int(0, dict.size(states) - 1)
+              let #(state, seed) = random.step(rnd_state, seed)
+
+              case dict.get(states, state) {
+                Ok(state) -> #(state, seed, True)
+                Error(_) -> #(puzzle_state, seed, False)
+              }
+            }
+          }
+        }
+        Error(_) -> #(puzzle_state, seed, False)
+      }
+    }
+  }
+}
+
+fn print_puzzle(puzzle_state: PuzzleState) -> Nil {
   let column_sizes: Dict(Int, Int) =
     list.fold(
       list.range(0, puzzle_state.puzzle.size.x - 1),
@@ -196,15 +344,21 @@ fn print_puzzle(puzzle_state: PuzzleState) {
               Ok(UndefinedSymbol) -> #("?", "*")
 
               Ok(ConstantSymbol(symbol)) -> {
-                #("!", symbol)
+                case dict.get(puzzle_state.puzzle.symbols, symbol) {
+                  Ok(symbol) -> #("!", symbol)
+                  Error(_) -> #("!n", int.to_string(symbol))
+                }
               }
 
               Ok(FieldSymbol(symbol)) -> {
                 let collission = dict.has_key(puzzle_state.collisions, position)
+                let symbol_value = dict.get(puzzle_state.puzzle.symbols, symbol)
 
-                case collission {
-                  True -> #("~", symbol)
-                  False -> #("", symbol)
+                case collission, symbol_value {
+                  True, Ok(symbol) -> #("~", symbol)
+                  True, Error(_) -> #("~n", int.to_string(symbol))
+                  False, Ok(symbol) -> #("", symbol)
+                  False, Error(_) -> #("n", int.to_string(symbol))
                 }
               }
               Error(Nil) -> #(" ", "")
@@ -303,4 +457,6 @@ fn print_puzzle(puzzle_state: PuzzleState) {
       False -> Nil
     }
   })
+
+  Nil
 }
