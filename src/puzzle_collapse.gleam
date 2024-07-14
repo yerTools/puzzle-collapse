@@ -185,24 +185,29 @@ pub fn main() {
   let seed = seed.new(0)
 
   print_puzzle(puzzle)
-  let #(puzzle, _) =
+  let #(puzzle, _, _) =
     list.fold_until(
       list.range(1, 10_000),
-      #(puzzle, seed),
+      #(puzzle, seed, dict.size(puzzle.collisions)),
       fn(state, iteration) {
-        let #(puzzle, seed) = state
+        let #(puzzle, seed, collisions) = state
 
         let #(puzzle, seed, success) = set_random_cell(puzzle, seed)
+        let next_collitions = dict.size(puzzle.collisions)
 
-        io.println(
-          "Iteration #"
-          <> int.to_string(iteration)
-          <> " collisions: "
-          <> int.to_string(dict.size(puzzle.collisions))
-          <> " ("
-          <> bool.to_string(success)
-          <> ")",
-        )
+        case collisions == next_collitions {
+          True -> Nil
+          False ->
+            io.println(
+              "Iteration #"
+              <> int.to_string(iteration)
+              <> " collisions: "
+              <> int.to_string(dict.size(puzzle.collisions))
+              <> " ("
+              <> bool.to_string(success)
+              <> ")",
+            )
+        }
 
         case success {
           True -> {
@@ -211,10 +216,10 @@ pub fn main() {
               _ -> Nil
             }
 
-            Continue(#(puzzle, seed))
+            Continue(#(puzzle, seed, next_collitions))
           }
           False -> {
-            Stop(#(puzzle, seed))
+            Stop(#(puzzle, seed, next_collitions))
           }
         }
       },
@@ -227,10 +232,14 @@ fn set_random_cell(
   puzzle_state: PuzzleState,
   seed: seed.Seed,
 ) -> #(PuzzleState, seed.Seed, Bool) {
-  let symbols = dict.to_list(puzzle_state.field_symbols)
+  let get_possibilities = fn(
+    puzzle_state: PuzzleState,
+    possibilities: Dict(Int, Vector2D),
+    all: Bool,
+  ) {
+    let symbols = dict.to_list(puzzle_state.field_symbols)
 
-  let possibilities =
-    list.fold(symbols, dict.new(), fn(possibilities, cell) {
+    list.fold(symbols, possibilities, fn(possibilities, cell) {
       let #(position, symbol) = cell
       case symbol {
         ConstantSymbol(_) -> possibilities
@@ -238,13 +247,26 @@ fn set_random_cell(
           dict.insert(possibilities, dict.size(possibilities), position)
         FieldSymbol(_) -> {
           case dict.has_key(puzzle_state.collisions, position) {
-            False -> possibilities
+            False ->
+              case all {
+                False -> possibilities
+                True ->
+                  dict.insert(possibilities, dict.size(possibilities), position)
+              }
             True ->
               dict.insert(possibilities, dict.size(possibilities), position)
           }
         }
       }
     })
+  }
+
+  let possibilities =
+    get_possibilities(
+      puzzle_state,
+      get_possibilities(puzzle_state, dict.new(), False),
+      True,
+    )
 
   case dict.is_empty(possibilities) {
     True -> #(puzzle_state, seed, False)
@@ -283,7 +305,7 @@ fn set_random_cell(
               None,
               fn(state, value) {
                 let next = update(puzzle_state, value)
-                let n = dict.size(puzzle_state.collisions)
+                let n = dict.size(next.collisions)
 
                 case state {
                   None -> Some(#(n, dict.new() |> dict.insert(0, next)))
@@ -301,12 +323,18 @@ fn set_random_cell(
 
           case next_states {
             None -> #(puzzle_state, seed, False)
-            Some(#(_, states)) -> {
+            Some(#(n, states)) -> {
               let rnd_state = random.int(0, dict.size(states) - 1)
               let #(state, seed) = random.step(rnd_state, seed)
 
               case dict.get(states, state) {
-                Ok(state) -> #(state, seed, True)
+                Ok(state) -> #(
+                  state,
+                  seed,
+                  n != 0
+                    || dict.size(get_possibilities(state, dict.new(), False))
+                    != 0,
+                )
                 Error(_) -> #(puzzle_state, seed, False)
               }
             }
